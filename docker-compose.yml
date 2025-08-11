@@ -1,0 +1,83 @@
+# Research Intelligence Automation System - Docker Compose
+# For local development and testing
+
+version: '3.8'
+
+services:
+  research-intelligence:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: research-intelligence-system
+    restart: unless-stopped
+    
+    # Environment variables
+    environment:
+      - DAILY_ANALYSIS_TIME=09:00
+      - TIMEZONE=UTC
+      - RUN_ON_STARTUP=false
+      - RUN_MODE=scheduler
+      - HEALTH_CHECK_PORT=8080
+      - HEADLESS_MODE=true
+      - ENABLE_EMAIL_REPORTS=true
+      - ENABLE_ARCHIVING=true
+      
+      # API Keys (set these in .env file)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      
+      # Email Configuration (set these in .env file)
+      - EMAIL_SENDER=${EMAIL_SENDER}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+      - EMAIL_RECIPIENTS=${EMAIL_RECIPIENTS}
+      
+      # Browser Use Configuration
+      - BROWSER_USE_LOGGING_LEVEL=info
+      - BROWSER_USE_DEBUG=false
+    
+    # Persistent volumes for data storage
+    volumes:
+      - research_results:/app/research_results
+      - logs:/app/logs
+      - /etc/localtime:/etc/localtime:ro  # Sync container time with host
+    
+    # Port mapping for health checks
+    ports:
+      - "8080:8080"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Named volumes for persistent data
+volumes:
+  research_results:
+    driver: local
+  logs:
+    driver: local
+
+# Network configuration
+networks:
+  default:
+    name: research-intelligence-network

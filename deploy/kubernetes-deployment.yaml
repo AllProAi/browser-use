@@ -1,0 +1,243 @@
+# Kubernetes deployment for Research Intelligence System
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: research-intelligence
+  labels:
+    name: research-intelligence
+
+---
+# ConfigMap for non-sensitive configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: research-intelligence-config
+  namespace: research-intelligence
+data:
+  DAILY_ANALYSIS_TIME: "09:00"
+  TIMEZONE: "UTC"
+  RUN_MODE: "scheduler"
+  HEADLESS_MODE: "true"
+  ENABLE_EMAIL_REPORTS: "true"
+  ENABLE_ARCHIVING: "true"
+  HEALTH_CHECK_PORT: "8080"
+  BROWSER_USE_LOGGING_LEVEL: "info"
+
+---
+# Secret for sensitive configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: research-intelligence-secrets
+  namespace: research-intelligence
+type: Opaque
+stringData:
+  OPENAI_API_KEY: "your-openai-api-key-here"
+  ANTHROPIC_API_KEY: "your-anthropic-api-key-here"
+  EMAIL_SENDER: "your-email@gmail.com"
+  EMAIL_PASSWORD: "your-app-password-here"
+  EMAIL_RECIPIENTS: "recipient1@email.com,recipient2@email.com"
+
+---
+# Persistent Volume Claim for research results
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: research-results-pvc
+  namespace: research-intelligence
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+# Persistent Volume Claim for logs
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: logs-pvc
+  namespace: research-intelligence
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: research-intelligence-deployment
+  namespace: research-intelligence
+  labels:
+    app: research-intelligence
+spec:
+  replicas: 1  # Single instance for scheduled tasks
+  selector:
+    matchLabels:
+      app: research-intelligence
+  template:
+    metadata:
+      labels:
+        app: research-intelligence
+    spec:
+      containers:
+      - name: research-intelligence
+        image: your-registry/research-intelligence:latest
+        imagePullPolicy: Always
+        
+        # Environment variables from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: research-intelligence-config
+        - secretRef:
+            name: research-intelligence-secrets
+        
+        # Ports
+        ports:
+        - containerPort: 8080
+          name: health-check
+        
+        # Volume mounts
+        volumeMounts:
+        - name: research-results
+          mountPath: /app/research_results
+        - name: logs
+          mountPath: /app/logs
+        
+        # Resource limits
+        resources:
+          requests:
+            cpu: "1000m"
+            memory: "2Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+        
+        # Startup probe
+        startupProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 10
+        
+        # Liveness probe
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        # Readiness probe
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      
+      # Volumes
+      volumes:
+      - name: research-results
+        persistentVolumeClaim:
+          claimName: research-results-pvc
+      - name: logs
+        persistentVolumeClaim:
+          claimName: logs-pvc
+      
+      # Restart policy
+      restartPolicy: Always
+
+---
+# Service for health checks
+apiVersion: v1
+kind: Service
+metadata:
+  name: research-intelligence-service
+  namespace: research-intelligence
+  labels:
+    app: research-intelligence
+spec:
+  selector:
+    app: research-intelligence
+  ports:
+  - name: health-check
+    port: 8080
+    targetPort: 8080
+  type: ClusterIP
+
+---
+# Alternative: CronJob for job-based execution
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: research-intelligence-cronjob
+  namespace: research-intelligence
+spec:
+  # Run daily at 9:00 AM UTC
+  schedule: "0 9 * * *"
+  timeZone: "UTC"
+  
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: research-intelligence
+            image: your-registry/research-intelligence:latest
+            
+            # Environment variables for one-time run
+            env:
+            - name: RUN_MODE
+              value: "once"
+            
+            envFrom:
+            - configMapRef:
+                name: research-intelligence-config
+            - secretRef:
+                name: research-intelligence-secrets
+            
+            # Volume mounts
+            volumeMounts:
+            - name: research-results
+              mountPath: /app/research_results
+            - name: logs
+              mountPath: /app/logs
+            
+            # Resource limits
+            resources:
+              requests:
+                cpu: "1000m"
+                memory: "2Gi"
+              limits:
+                cpu: "2000m"
+                memory: "4Gi"
+          
+          # Volumes
+          volumes:
+          - name: research-results
+            persistentVolumeClaim:
+              claimName: research-results-pvc
+          - name: logs
+            persistentVolumeClaim:
+              claimName: logs-pvc
+          
+          restartPolicy: OnFailure
+  
+  # Job history limits
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
